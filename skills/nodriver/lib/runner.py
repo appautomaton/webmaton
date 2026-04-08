@@ -77,9 +77,9 @@ def _candidate_paths() -> list[Path]:
     if env_path:
         cands.append(Path(env_path))
 
-    # 2. PATH
-    for name in ("chromium", "google-chrome", "chromium-browser",
-                 "chrome", "google-chrome-stable"):
+    # 2. PATH — prefer Chrome over Chromium
+    for name in ("google-chrome", "google-chrome-stable", "chrome",
+                 "chromium", "chromium-browser"):
         p = shutil.which(name)
         if p:
             cands.append(Path(p))
@@ -88,12 +88,12 @@ def _candidate_paths() -> list[Path]:
     system = platform.system()
     if system == "Linux":
         cands += [
-            Path("/usr/bin/chromium"),
-            Path("/usr/bin/chromium-browser"),
             Path("/usr/bin/google-chrome"),
             Path("/usr/bin/google-chrome-stable"),
-            Path("/snap/bin/chromium"),
             Path("/opt/google/chrome/chrome"),
+            Path("/usr/bin/chromium"),
+            Path("/usr/bin/chromium-browser"),
+            Path("/snap/bin/chromium"),
         ]
     elif system == "Darwin":
         cands += [
