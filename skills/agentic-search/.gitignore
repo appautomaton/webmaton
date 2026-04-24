@@ -1,0 +1,12 @@
+# Environment files
+.env
+.env.*
+*.env
+*.env.*
+!.env.template
+!.env.*.template
+!*.env.template
+
+# Python bytecode
+__pycache__/
+*.pyc

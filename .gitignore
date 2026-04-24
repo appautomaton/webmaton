@@ -1,15 +1,28 @@
 # Python bytecode
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 
 # Virtual environments
 .venv/
+**/.venv/
 venv/
 env/
 
+# Environment files
+.env
+.env.*
+*.env
+*.env.*
+*.local
+!.env.template
+!.env.*.template
+!*.env.template
+
 # Packaging
 *.egg-info/
+**/*.egg-info/
 build/
 dist/
 
@@ -18,6 +31,18 @@ dist/
 .mypy_cache/
 .ruff_cache/
 .uv-cache/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.uv-cache/
+
+# Browser/runtime artifacts
+screenshots/
+captures/
+tmp/
+*.png
+*.har
+*.webm
 
 # OS / editor
 .DS_Store

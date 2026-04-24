@@ -1,6 +1,6 @@
 ---
 name: nodriver-browser
-description: Drive a persistent Chromium tab across turn boundaries — navigate, snapshot the DOM with stable refs, click/type interactively, scrape pages that need login or JS. Auto-starts a stealth headless browser daemon on first use; the same tab survives between every script call so the model can run a real look→think→act loop. Falls through anti-bot detection that blocks WebFetch.
+description: "Persistent Chrome/Chromium browser automation skill built on nodriver. Use when a page needs JavaScript rendering, authorized login/session continuity, clicking or typing, DOM snapshots with stable refs, screenshots, or multi-step look-think-act flows that ordinary WebFetch/search cannot complete. Auto-starts a headless Chromium daemon and preserves one tab across calls; not for static pages, simple searches, JSON APIs, or one-off scrapes."
 ---
 
 # nodriver-browser
