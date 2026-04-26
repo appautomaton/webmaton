@@ -7,7 +7,7 @@ description: Convert a URL or HTML into clean Markdown with metadata using markm
 
 ## Composes with
 
-- **Called by** — `RECIPES.md` `parse-jd` recipe (step 1). Any capture-a-web-page task in the workspace prefers this over built-in `WebFetch`.
+- **Use for** — capture-a-web-page tasks where browser-rendered HTML or structured Markdown is needed.
 - **Wraps** — nodriver (CDP-based headless browser capture for JS-heavy pages, with Playwright Chromium discovery) and markmaton (HTML→Markdown with main-content extraction, metadata, and link/image inventory). See `references/integration-patterns.md` for browser-vs-fetch guidance.
 - **Outputs** — JSON envelope by default (markdown body + metadata + links + images + quality signals). Use `--output-format markdown` when only the raw Markdown body is needed.
 

@@ -61,6 +61,12 @@ Each skill's `SKILL.md` contains invocation examples, reference docs, and failur
 
 ---
 
+## Underlying tools
+
+`html-to-markdown` uses [`markmaton`](https://github.com/appautomaton/markmaton) for deterministic HTML-to-Markdown conversion, with `nodriver` handling browser-rendered capture when JavaScript is needed.
+
+---
+
 ## License
 
 MIT

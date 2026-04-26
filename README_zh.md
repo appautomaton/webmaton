@@ -61,6 +61,12 @@ ln -s "$(pwd)/skills/agentic-search" ~/.claude/skills/agentic-search
 
 ---
 
+## 底层工具
+
+`html-to-markdown` 使用 [`markmaton`](https://github.com/appautomaton/markmaton) 做确定性的 HTML 转 Markdown；需要 JavaScript 渲染时由 `nodriver` 负责浏览器页面捕获。
+
+---
+
 ## 许可证
 
 MIT
