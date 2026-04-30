@@ -22,6 +22,8 @@ The name is a portmanteau of **web** and **automaton** — tools that let AI age
 | [`agentic-search`](skills/agentic-search/) | Grok-primary deep research with grounded citations, Tavily/Firecrawl source discovery, verbatim extraction, and rerankable sessions. | Research tasks that need sources, not summaries. |
 | [`html-to-markdown`](skills/html-to-markdown/) | Browser capture + deterministic HTML→Markdown conversion with metadata, link/image inventory, and quality signals. | Converting JS-heavy pages or static articles into clean, structured Markdown. |
 | [`nodriver-browser`](skills/nodriver-browser/) | Persistent Chrome/Chromium automation via nodriver — clicks, typing, screenshots, DOM snapshots, and multi-step flows. | Anything that requires interacting with a page like a human (logins, buttons, forms). |
+| [`playwright-cli`](skills/playwright-cli/) | Playwright-backed browser sessions with snapshots, element refs, generated test code, storage, network, tracing, and video commands. | Repeatable browser flows, Playwright test debugging, and test generation. |
+| [`chrome-devtools-cli`](skills/chrome-devtools-cli/) | Chrome DevTools action CLI for snapshots, page interaction, console/network inspection, screenshots, Lighthouse, and performance traces. | Frontend runtime debugging, layout inspection, and performance diagnostics. |
 
 ---
 
@@ -54,6 +56,9 @@ Each skill's `SKILL.md` contains invocation examples, reference docs, and failur
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) (for `uv run` script execution)
+- Node.js and npm for CLI-backed browser skills:
+  - Node.js 18+ for `playwright-cli`
+  - Node.js 20.19+ plus current Chrome stable for `chrome-devtools-cli`
 - API keys for providers you plan to use:
   - `GROK_API_KEY` / `GROK_API_URL` — for Grok-powered search and fetch
   - `TAVILY_API_KEY` — for Tavily search and site mapping
@@ -64,6 +69,8 @@ Each skill's `SKILL.md` contains invocation examples, reference docs, and failur
 ## Underlying tools
 
 `html-to-markdown` uses [`markmaton`](https://github.com/appautomaton/markmaton) for deterministic HTML-to-Markdown conversion, with `nodriver` handling browser-rendered capture when JavaScript is needed.
+
+`playwright-cli` uses Microsoft's [`@playwright/cli`](https://github.com/microsoft/playwright-cli). `chrome-devtools-cli` uses the `chrome-devtools` command from Google's [`chrome-devtools-mcp`](https://github.com/ChromeDevTools/chrome-devtools-mcp) package.
 
 ---
 

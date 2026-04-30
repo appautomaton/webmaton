@@ -22,6 +22,8 @@
 | [`agentic-search`](skills/agentic-search/) | 以 Grok 为主的深度研究，含引证溯源、Tavily/Firecrawl 补充发现、原文摘录与可重排会话。 | 需要来源而非摘要的研究任务。 |
 | [`html-to-markdown`](skills/html-to-markdown/) | 浏览器捕获 + 确定性 HTML→Markdown 转换，附带元数据、链接/图片清单与质量信号。 | 将 JS 渲染页面或静态文章转为整洁的结构化 Markdown。 |
 | [`nodriver-browser`](skills/nodriver-browser/) | 基于 nodriver 的持久 Chrome/Chromium 自动化——点击、输入、截图、DOM 快照与多步流程。 | 需要像人类一样操作页面（登录、按钮、表单）。 |
+| [`playwright-cli`](skills/playwright-cli/) | 基于 Playwright 的浏览器会话 CLI，支持快照、元素引用、生成测试代码、存储、网络、trace 与视频命令。 | 可重复的浏览器流程、Playwright 测试调试与测试生成。 |
+| [`chrome-devtools-cli`](skills/chrome-devtools-cli/) | Chrome DevTools action CLI，支持页面快照、交互、控制台/网络检查、截图、Lighthouse 与性能 trace。 | 前端运行时调试、布局检查与性能诊断。 |
 
 ---
 
@@ -54,6 +56,9 @@ ln -s "$(pwd)/skills/agentic-search" ~/.claude/skills/agentic-search
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)（用于 `uv run` 执行脚本）
+- CLI 浏览器 Skill 需要 Node.js 与 npm：
+  - `playwright-cli` 需要 Node.js 18+
+  - `chrome-devtools-cli` 需要 Node.js 20.19+ 与当前稳定版 Chrome
 - 所用服务商的 API 密钥：
   - `GROK_API_KEY` / `GROK_API_URL` — Grok 搜索与抓取
   - `TAVILY_API_KEY` — Tavily 搜索与站点映射
@@ -64,6 +69,8 @@ ln -s "$(pwd)/skills/agentic-search" ~/.claude/skills/agentic-search
 ## 底层工具
 
 `html-to-markdown` 使用 [`markmaton`](https://github.com/appautomaton/markmaton) 做确定性的 HTML 转 Markdown；需要 JavaScript 渲染时由 `nodriver` 负责浏览器页面捕获。
+
+`playwright-cli` 使用 Microsoft 的 [`@playwright/cli`](https://github.com/microsoft/playwright-cli)；`chrome-devtools-cli` 使用 Google [`chrome-devtools-mcp`](https://github.com/ChromeDevTools/chrome-devtools-mcp) 包提供的 `chrome-devtools` 命令。
 
 ---
 

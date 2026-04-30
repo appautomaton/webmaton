@@ -36,6 +36,20 @@ dist/
 **/.ruff_cache/
 **/.uv-cache/
 
+# Node / browser test artifacts
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+playwright-report/
+**/playwright-report/
+test-results/
+**/test-results/
+blob-report/
+**/blob-report/
+
 # Browser/runtime artifacts
 screenshots/
 captures/
