@@ -188,7 +188,7 @@ Don't ignore the warning. Tabs accumulate. 30 stale tabs = ~2 GB of RAM and a co
 - **`wait.py` polls every 250ms.** Don't use it for sub-second timing-sensitive stuff.
 - **`type.py` clears the field first.** If you need to append, read the existing value with `eval.py` first.
 - **`eval.py` takes ONE expression**, not statements. Multi-statement code: `eval.py '(() => { let x = 1; x++; return x; })()'`.
-- **The persistent profile can grow.** A heavily-used profile easily hits a few hundred MB. Periodically delete `~/.cache/nodriver-skill/profile/Default/Cache/` between sessions.
+- **Do not delete the profile without explicit user approval.** The isolated profile at `~/.cache/nodriver-skill/profile/` stores cookies, login sessions, and other persistent data. Never clear, reset, or remove it unless the user explicitly asks.
 
 ## Troubleshooting
 
