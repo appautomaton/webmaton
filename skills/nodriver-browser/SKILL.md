@@ -30,6 +30,12 @@ This skill spawns a Chromium process (~150-200 MB RAM) that stays alive until yo
 
 Scripts live in `scripts/` next to this SKILL.md — resolve paths relative to the skill root.
 
+Run them directly as executables; the `#!/usr/bin/env -S uv run --script`
+shebang invokes uv and reads the PEP 723 metadata for you. Do **not** run these
+scripts with `python`, `python3`, or `python -m`; that bypasses the shebang,
+dependency metadata, and Python version pin. If executable dispatch is
+unavailable, use `uv run --script scripts/nav.py ...`.
+
 ```bash
 # 1. Navigate (auto-starts daemon on first call — no manual start needed)
 scripts/nav.py https://news.ycombinator.com
@@ -52,7 +58,7 @@ scripts/stop_daemon.py
 
 ## Script reference
 
-All runnable scripts use `uv run --script` with PEP 723 metadata and return JSON to stdout. Every script (except daemon control) appends `tabs_open: N` and emits a `warning` field if `N > 1`.
+All runnable scripts use `uv run --script` with PEP 723 metadata and return JSON to stdout. Invoke them directly, not through `python` or `python3`. Every script (except daemon control) appends `tabs_open: N` and emits a `warning` field if `N > 1`.
 
 Leading browser options work on `start_daemon.py` and every script that auto-starts/attaches:
 
