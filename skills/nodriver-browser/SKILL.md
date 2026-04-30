@@ -154,7 +154,7 @@ The daemon is **singleton-enforced via `fcntl.flock`** on `/tmp/nodriver-skill/s
 - **Port**: 9222 by default. Override with `NODRIVER_SKILL_PORT=9223` if something else holds 9222.
 - **Mode**: headless by default. Use `--headed` for a visible window. You cannot change a running daemon from headless to headed; stop it first.
 - **Profile**: isolated skill profile by default: `~/.cache/nodriver-skill/profile/` (cookies, localStorage, IndexedDB, etc.). Use `--user-profile` for the user's Chrome profile.
-- **Chrome binary**: uses `CHROMIUM_PATH` / `CHROME_PATH` first, then system Chrome/Chromium paths, including macOS `/Applications/Google Chrome.app/...`.
+- **Chrome binary**: search order is `CHROMIUM_PATH` / `CHROME_PATH` env vars, then `PATH` binaries, then standard OS install paths, then the Playwright Chromium cache. Set `CHROMIUM_PATH=/path/to/chrome` to override.
 - **Sandbox**: Chrome's sandbox is enabled by default. Only pass `--no-sandbox` for constrained environments where Chrome cannot start with the OS sandbox, such as PRoot/container/root setups.
 
 ## Tab hygiene (READ THIS)

@@ -60,7 +60,6 @@ PERSISTENT_TAB_FILE = STATE_DIR / "persistent_tab_id"
 
 CACHE_DIR = Path.home() / ".cache" / "nodriver-skill"
 PROFILE_DIR = CACHE_DIR / "profile"
-CHROME_PATH_CACHE = CACHE_DIR / "chrome_path"
 
 DAEMON_BOOT_TIMEOUT_S = 6.0
 DAEMON_POLL_INTERVAL_S = 0.1
@@ -305,46 +304,27 @@ def _candidate_paths() -> list[Path]:
     )
     cands += [Path(p) for p in pw_matches]
 
-    # 5. Puppeteer cache
-    pt_pattern = str(Path.home() / ".cache" / "puppeteer" / "chrome" /
-                     "*" / "chrome-linux*" / "chrome")
-    cands += [Path(p) for p in sorted(glob.glob(pt_pattern), reverse=True)]
-
     return cands
 
 
 def find_chrome() -> str:
     """
-    Locate a usable chromium-family binary. Result is cached to disk so
-    we don't re-search on every script invocation.
+    Locate a usable chromium-family binary.
+
+    Search order:
+      1. CHROMIUM_PATH / CHROME_PATH environment variables
+      2. PATH binaries (Chrome first, then Chromium)
+      3. Standard OS install paths
+      4. Playwright Chromium cache
 
     Raises FileNotFoundError with install instructions if nothing found.
     """
-    _ensure_dirs()
-
-    # Use cached value if it still exists.
-    if CHROME_PATH_CACHE.exists():
-        cached = CHROME_PATH_CACHE.read_text().strip()
-        if cached and Path(cached).exists() and os.access(cached, os.X_OK):
-            return cached
-
     for c in _candidate_paths():
         try:
             if c.exists() and os.access(c, os.X_OK):
-                CHROME_PATH_CACHE.write_text(str(c))
                 return str(c)
         except OSError:
             continue
-
-    # Last-ditch: ask nodriver itself
-    try:
-        from nodriver.core.config import find_chrome_executable
-        p = find_chrome_executable()
-        if p:
-            CHROME_PATH_CACHE.write_text(str(p))
-            return str(p)
-    except Exception:
-        pass
 
     raise FileNotFoundError(
         "No chromium binary found. Install one of:\n"
