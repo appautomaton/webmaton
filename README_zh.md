@@ -7,7 +7,7 @@
 > 项目首发于 [linux.do](https://linux.do)。感谢社区的鼎力支持与宝贵反馈。
 
 > [!IMPORTANT]
-> 运行这些 Skill 需要 [**uv**](https://docs.astral.sh/uv/)。所有脚本均使用 [PEP 723](https://peps.python.org/pep-0723/) 内联元数据声明依赖，通过 `uv run` 自动解析。无需手动维护 `requirements.txt`。
+> 运行这些 Skill 需要 [**uv**](https://docs.astral.sh/uv/) 与 Python 3.13。所有可执行入口脚本均使用 [PEP 723](https://peps.python.org/pep-0723/) 内联元数据声明依赖，通过 `uv run` 自动解析。无需手动维护 `requirements.txt`。
 
 **Webmaton** 是一套精心策划的高保真 Agent Skill 工具包，专注网页工作场景——深度研究、页面捕获与浏览器自动化。每个 Skill 自成一体、文档完备，可零摩擦接入任意 Agent 运行时（OpenCode、Claude、Codex 等）。
 
@@ -29,7 +29,7 @@
 
 ## 设计原则
 
-1. **脚本自包含** — 所有脚本使用 [PEP 723](https://peps.python.org/pep-0723/) 内联元数据，依赖通过 `uv run` 自动解析，无需 `requirements.txt`。
+1. **入口脚本自包含** — 所有可执行 Skill 入口脚本使用 [PEP 723](https://peps.python.org/pep-0723/) 内联元数据，依赖通过 `uv run` 自动解析；私有 `_*.py` helper 模块由入口导入，不作为独立命令运行。
 2. **可组合会话** — `agentic-search` 将研究会话持久化到磁盘，支持跨多次调用进行搜索、摘录、重排来源与组合发现。
 3. **浏览器优先的保真度** — 遇到需要 JavaScript、登录态或 DOM 交互的页面时，直接启动真实浏览器（Chrome → Chromium → Playwright 兜底）；静态内容则直接抓取，不过度设计。
 4. **默认可移植** — Skill 支持符号链接，与运行时无关。放入 `~/.codex/skills/`、`~/.claude/skills/` 或任意 Agent 工作区即可使用。
@@ -54,7 +54,7 @@ ln -s "$(pwd)/skills/agentic-search" ~/.claude/skills/agentic-search
 
 ## 环境要求
 
-- Python 3.12+
+- Python 3.13
 - [uv](https://docs.astral.sh/uv/)（用于 `uv run` 执行脚本）
 - CLI 浏览器 Skill 需要 Node.js 与 npm：
   - `playwright-cli` 需要 Node.js 18+

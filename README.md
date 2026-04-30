@@ -7,7 +7,7 @@ English | [中文](README_zh.md)
 > Special thanks to LINUX.DO — originally published on [linux.do](https://linux.do). Thank you to the community for the incredible support and feedback.
 
 > [!IMPORTANT]
-> These skills require [**uv**](https://docs.astral.sh/uv/) to run. All scripts use [PEP 723](https://peps.python.org/pep-0723/) inline metadata — dependencies resolve automatically via `uv run`. No `requirements.txt` needed.
+> These skills require [**uv**](https://docs.astral.sh/uv/) and Python 3.13. Runnable skill entrypoints use [PEP 723](https://peps.python.org/pep-0723/) inline metadata — dependencies resolve automatically via `uv run`. No `requirements.txt` needed.
 
 **Webmaton** is a curated toolkit of portable, high-fidelity agent skills for web work — deep research, page capture, and browser automation. Each skill is self-contained, documented, and designed to drop into any agent runtime (OpenCode, Claude, Codex, and others) with minimal setup.
 
@@ -29,7 +29,7 @@ The name is a portmanteau of **web** and **automaton** — tools that let AI age
 
 ## Design principles
 
-1. **Self-contained scripts** — Every script uses [PEP 723](https://peps.python.org/pep-0723/) inline metadata, so dependencies resolve automatically via `uv run`. No `requirements.txt` ceremony.
+1. **Self-contained entrypoints** — Every runnable skill entrypoint uses [PEP 723](https://peps.python.org/pep-0723/) inline metadata, so dependencies resolve automatically via `uv run`. Private `_*.py` helper modules are imported by entrypoints and are not standalone commands.
 2. **Composable sessions** — `agentic-search` persists research sessions to disk, letting you search, extract quotes, rerank sources, and compose findings across multiple invocations.
 3. **Browser-first fidelity** — When a page needs JavaScript, login state, or DOM interaction, we reach for a real browser (Chrome → Chromium → Playwright fallback). For static content, we fetch directly. No overkill.
 4. **Portable by default** — Skills are symlink-friendly and runtime-agnostic. Drop them into `~/.codex/skills/`, `~/.claude/skills/`, or your agent workspace and they just work.
@@ -54,7 +54,7 @@ Each skill's `SKILL.md` contains invocation examples, reference docs, and failur
 
 ## Requirements
 
-- Python 3.12+
+- Python 3.13
 - [uv](https://docs.astral.sh/uv/) (for `uv run` script execution)
 - Node.js and npm for CLI-backed browser skills:
   - Node.js 18+ for `playwright-cli`

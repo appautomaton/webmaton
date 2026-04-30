@@ -52,7 +52,7 @@ scripts/stop_daemon.py
 
 ## Script reference
 
-All scripts return JSON to stdout. Every script (except daemon control) appends `tabs_open: N` and emits a `warning` field if `N > 1`.
+All runnable scripts use `uv run --script` with PEP 723 metadata and return JSON to stdout. Every script (except daemon control) appends `tabs_open: N` and emits a `warning` field if `N > 1`.
 
 Leading browser options work on `start_daemon.py` and every script that auto-starts/attaches:
 
@@ -68,12 +68,12 @@ Leading browser options work on `start_daemon.py` and every script that auto-sta
 
 Environment equivalents: `NODRIVER_SKILL_MODE=headed|headless`, `NODRIVER_SKILL_PROFILE=skill|user`, `NODRIVER_CHROME_PROFILE_DIRECTORY="Profile 1"`, `NODRIVER_CHROME_USER_DATA_DIR=/path/to/User Data`, `NODRIVER_CHROME_NO_SANDBOX=1`.
 
-### Daemon control (no nodriver needed — fast)
+### Daemon control
 
 | Script | Purpose | Output |
 |---|---|---|
 | `start_daemon.py` | Idempotent start. No-op if already running. Supports leading browser options. | `{ok, pid, port, mode, profile, no_sandbox, already_running}` |
-| `stop_daemon.py` | Kill daemon, clean PID file + stale singleton locks. | `{ok, stopped}` |
+| `stop_daemon.py` | Kill daemon, clean PID file + stale singleton locks. Fails safely if a live CDP browser exists but no safe PID can be resolved. | `{ok, stopped}` or `{ok: false, error}` |
 | `status.py` | Daemon health + tab list. | `{alive, pid, process: {uptime_s, rss_kb}, tabs: [...]}` |
 
 ### Navigation & state
@@ -150,7 +150,7 @@ The daemon is **singleton-enforced via `fcntl.flock`** on `/tmp/nodriver-skill/s
 
 - **Auto-start**: First call to any interaction script (nav, state, snapshot, ...) auto-starts the daemon if it's not running. You don't need to call `start_daemon.py` first unless you want to verify it manually or choose options like `--headed --user-profile`.
 - **Persists**: The daemon runs with `start_new_session=True` so it survives the parent script exit. It will stay alive across all your turn boundaries until explicit shutdown.
-- **Explicit stop**: `stop_daemon.py` SIGTERMs the daemon, then SIGKILLs after 2s if needed, cleans the PID file and stale singleton locks. Run this at the end of any session that started the daemon.
+- **Explicit stop**: `stop_daemon.py` resolves the daemon PID from the pid file or the CDP debug port, SIGTERMs it, then SIGKILLs after 2s if needed, cleans the PID file and stale singleton locks. Run this at the end of any session that started the daemon.
 - **Port**: 9222 by default. Override with `NODRIVER_SKILL_PORT=9223` if something else holds 9222.
 - **Mode**: headless by default. Use `--headed` for a visible window. You cannot change a running daemon from headless to headed; stop it first.
 - **Profile**: isolated skill profile by default: `~/.cache/nodriver-skill/profile/` (cookies, localStorage, IndexedDB, etc.). Use `--user-profile` for the user's Chrome profile.
@@ -201,7 +201,7 @@ Don't ignore the warning. Tabs accumulate. 30 stale tabs = ~2 GB of RAM and a co
 | `tabs_open: 5, warning: ...` | Site opened popups/new tabs | `cleanup.py` closes everything except tabs[0] |
 | `Installed N packages` log noise on first run | uv resolving deps for the inline script | Normal — only happens once per skill version |
 | Hardlink errors during install | PRoot/container without hardlink support | Already mitigated: `UV_LINK_MODE=copy` is set automatically |
-| Daemon won't die after `stop_daemon.py` | Stale PID file, real PID lives elsewhere | `pkill -f remote-debugging-port=9222` (CAREFUL: this also kills other CDP browsers) |
+| `Chrome CDP daemon is alive ... no safe PID could be resolved` | Stale/missing PID file and PID discovery failed | Use `lsof -nP -iTCP:9222 -sTCP:LISTEN`, inspect the process, then stop only that Chrome process |
 
 ## Verifying it works
 

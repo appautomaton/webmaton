@@ -1,4 +1,8 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.13,<3.14"
+# dependencies = []
+# ///
 """Explicitly start the nodriver daemon. Usage: start_daemon.py [BROWSER_OPTIONS]"""
 import json
 import sys

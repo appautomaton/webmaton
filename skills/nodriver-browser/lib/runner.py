@@ -5,7 +5,7 @@ Provides:
   • find_chrome()       — discovery + cache
   • is_daemon_alive()   — port-based liveness check
   • pop_launch_mode()   — parse leading browser launch flags
-  • ensure_daemon()     — atomic singleton start (fcntl.flock)
+  • ensure_daemon()     — atomic singleton start/adopt (fcntl.flock)
   • stop_daemon()       — kill + clean
   • attach()            — async, returns nodriver Browser attached to the daemon
   • get_persistent_tab(), list_tabs(), tab_count(), cleanup_extra_tabs()
@@ -391,12 +391,15 @@ def _read_pid() -> int | None:
     if not PID_FILE.exists():
         return None
     try:
-        return int(PID_FILE.read_text().strip())
+        pid = int(PID_FILE.read_text().strip())
     except (ValueError, OSError):
         return None
+    return pid if pid > 0 else None
 
 
 def _process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
     try:
         os.kill(pid, 0)
         return True
@@ -404,27 +407,64 @@ def _process_alive(pid: int) -> bool:
         return False
 
 
+def _process_cmdline(pid: int) -> str | None:
+    """Best-effort process command line, using /proc first and ps as fallback."""
+    if pid <= 0:
+        return None
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+        return raw.replace(b"\0", b" ").decode("utf-8", "ignore").strip()
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+
+    try:
+        proc = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            timeout=0.5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip() or None
+
+
+def _cmdline_is_chrome(cmdline: str) -> bool:
+    lower = cmdline.lower()
+    return "chrome" in lower or "chromium" in lower
+
+
+def _cmdline_is_chrome_debug_daemon(cmdline: str, port: int = PORT) -> bool:
+    return _cmdline_is_chrome(cmdline) and f"--remote-debugging-port={port}" in cmdline
+
+
 def _process_is_chrome(pid: int) -> bool:
     """Best-effort check that PID's cmdline points at a chromium binary."""
-    try:
-        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "ignore")
-        return "chrome" in cmdline.lower() or "chromium" in cmdline.lower()
-    except (FileNotFoundError, PermissionError, OSError):
+    cmdline = _process_cmdline(pid)
+    return bool(cmdline and _cmdline_is_chrome(cmdline))
+
+
+def _process_owns_debug_port(pid: int | None, port: int = PORT) -> bool:
+    if pid is None or not _process_alive(pid):
         return False
+    cmdline = _process_cmdline(pid)
+    return bool(cmdline and _cmdline_is_chrome_debug_daemon(cmdline, port))
 
 
 def _process_launch_mode(pid: int | None) -> str | None:
     """Best-effort mode detection for live daemons we did not start."""
     if pid is None:
         return None
-    try:
-        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "ignore")
-        if "--headless" in cmdline:
-            return "headless"
-        if "chrom" in cmdline.lower():
-            return "headed"
-    except (FileNotFoundError, PermissionError, OSError):
-        pass
+    cmdline = _process_cmdline(pid)
+    if not cmdline:
+        return None
+    if "--headless" in cmdline:
+        return "headless"
+    if _cmdline_is_chrome(cmdline):
+        return "headed"
     return None
 
 
@@ -469,18 +509,19 @@ def running_no_sandbox() -> bool | None:
     pid = _read_pid()
     if pid is None:
         return None
-    try:
-        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "ignore")
-        if "--no-sandbox" in cmdline:
-            return True
-        if "chrom" in cmdline.lower():
-            return False
-    except (FileNotFoundError, PermissionError, OSError):
-        pass
+    cmdline = _process_cmdline(pid)
+    if not cmdline:
+        return None
+    if "--no-sandbox" in cmdline:
+        return True
+    if _cmdline_is_chrome(cmdline):
+        return False
     return None
 
 
 def _atomic_write_pid(pid: int) -> None:
+    if pid <= 0:
+        raise ValueError("refusing to write invalid daemon PID")
     tmp = PID_FILE.with_suffix(".tmp")
     tmp.write_text(str(pid))
     tmp.replace(PID_FILE)
@@ -542,10 +583,11 @@ class _StartLock:
             self._fd.close()
 
 
-def ensure_daemon(mode: str | None = None) -> int:
+def ensure_daemon(mode: str | None = None) -> int | None:
     """
     Idempotent + race-free: guarantee exactly one Chromium daemon is running
-    on PORT, and return its PID. Safe to call from concurrent processes.
+    on PORT, and return its PID when safely known. Safe to call from
+    concurrent processes.
 
     If mode is explicit and a daemon already exists in the opposite mode, the
     caller must stop it first; a running browser cannot be made headed/headless
@@ -562,10 +604,11 @@ def ensure_daemon(mode: str | None = None) -> int:
         # Re-check inside the lock — someone else may have just started it.
         if is_daemon_alive():
             pid = _read_pid()
-            if pid is None:
-                # Adopt: alive but no PID file (e.g. survived a state wipe).
-                _atomic_write_pid(_find_chrome_pid_on_port() or 0)
-                pid = _read_pid() or 0
+            if not _process_owns_debug_port(pid):
+                # Adopt: alive but no usable PID file (e.g. survived state wipe).
+                pid = _find_chrome_pid_on_port()
+                if pid is not None:
+                    _atomic_write_pid(pid)
             current_mode = running_launch_mode()
             if requested_mode is not None:
                 if current_mode is None:
@@ -721,21 +764,60 @@ def ensure_daemon(mode: str | None = None) -> int:
         )
 
 
-def _find_chrome_pid_on_port() -> int | None:
-    """Best-effort: find a chrome PID with our --remote-debugging-port=PORT."""
+def _find_chrome_pid_on_port_proc(port: int = PORT) -> int | None:
+    """Best-effort Linux/ProcFS lookup for a chrome PID on our debug port."""
     try:
         for d in Path("/proc").iterdir():
             if not d.name.isdigit():
                 continue
             try:
-                cmdline = (d / "cmdline").read_bytes().decode("utf-8", "ignore")
+                raw = (d / "cmdline").read_bytes()
             except (FileNotFoundError, PermissionError, OSError):
                 continue
-            if f"--remote-debugging-port={PORT}" in cmdline and "chrom" in cmdline.lower():
+            cmdline = raw.replace(b"\0", b" ").decode("utf-8", "ignore")
+            if _cmdline_is_chrome_debug_daemon(cmdline, port):
                 return int(d.name)
     except OSError:
         pass
     return None
+
+
+def _find_chrome_pid_on_port_lsof(port: int = PORT) -> int | None:
+    """Best-effort macOS/Unix lookup for a chrome PID listening on the port."""
+    if not shutil.which("lsof"):
+        return None
+    try:
+        proc = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line.isdigit():
+            continue
+        pid = int(line)
+        if _process_owns_debug_port(pid, port):
+            return pid
+    return None
+
+
+def _find_chrome_pid_on_port(port: int = PORT) -> int | None:
+    """Best-effort: find a chrome PID with our --remote-debugging-port=PORT."""
+    return _find_chrome_pid_on_port_proc(port) or _find_chrome_pid_on_port_lsof(port)
+
+
+def _resolve_daemon_pid(port: int = PORT) -> int | None:
+    pid = _read_pid()
+    if _process_owns_debug_port(pid, port):
+        return pid
+    return _find_chrome_pid_on_port(port)
 
 
 def _clear_session_state() -> None:
@@ -755,11 +837,16 @@ def stop_daemon() -> bool:
     Returns True if a daemon was running, False if there was nothing to stop.
     """
     with _StartLock():
-        pid = _read_pid()
-        if pid is None or not _process_alive(pid):
-            # Maybe it died but left junk; still clean up.
+        alive = is_daemon_alive()
+        pid = _resolve_daemon_pid()
+        if pid is None:
             _clear_session_state()
             _clean_stale_locks()
+            if alive:
+                raise RuntimeError(
+                    f"Chrome CDP daemon is alive on port {PORT}, but no safe PID "
+                    "could be resolved. Refusing to kill an unidentified process."
+                )
             return False
 
         try:
@@ -776,6 +863,16 @@ def stop_daemon() -> bool:
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+        for _ in range(20):
+            if not is_daemon_alive():
+                break
+            time.sleep(0.1)
+        else:
+            raise RuntimeError(
+                f"sent shutdown signals to PID {pid}, but Chrome CDP is still "
+                f"alive on port {PORT}"
+            )
 
         _clear_session_state()
         _clean_stale_locks()

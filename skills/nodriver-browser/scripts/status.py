@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.10"
+# requires-python = ">=3.13,<3.14"
 # dependencies = ["nodriver"]
 # ///
 """Daemon health check + tab list. Returns JSON."""
