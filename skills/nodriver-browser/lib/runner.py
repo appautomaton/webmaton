@@ -4,6 +4,7 @@ runner.py — shared library for the nodriver-browser skill.
 Provides:
   • find_chrome()       — discovery + cache
   • is_daemon_alive()   — port-based liveness check
+  • pop_launch_mode()   — parse leading browser launch flags
   • ensure_daemon()     — atomic singleton start (fcntl.flock)
   • stop_daemon()       — kill + clean
   • attach()            — async, returns nodriver Browser attached to the daemon
@@ -16,6 +17,13 @@ Design notes:
   • ALL paths and constants live here. Scripts must not hardcode them.
   • Port can be overridden with NODRIVER_SKILL_PORT for users who already
     have something on 9222.
+  • Browser mode defaults to headless. Use a leading --headed script flag or
+    NODRIVER_SKILL_MODE=headed when spawning a visible browser.
+  • Profile defaults to the isolated skill profile. Use --user-profile or
+    NODRIVER_SKILL_PROFILE=user to launch against the user's Chrome profile.
+  • Chrome sandbox stays enabled by default. Use --no-sandbox or
+    NODRIVER_CHROME_NO_SANDBOX=1 only in constrained environments that cannot
+    run Chrome's OS sandbox, such as PRoot/container/root setups.
 """
 
 from __future__ import annotations
@@ -44,6 +52,9 @@ STATE_DIR = Path("/tmp/nodriver-skill")
 PID_FILE = STATE_DIR / "pid"
 LOCK_FILE = STATE_DIR / "start.lock"
 LOG_FILE = STATE_DIR / "daemon.log"
+MODE_FILE = STATE_DIR / "mode"
+PROFILE_FILE = STATE_DIR / "profile.json"
+SANDBOX_FILE = STATE_DIR / "sandbox"
 REFS_FILE = STATE_DIR / "refs.json"
 PERSISTENT_TAB_FILE = STATE_DIR / "persistent_tab_id"
 
@@ -58,12 +69,189 @@ ALIVE_HTTP_TIMEOUT_S = 0.5
 # Singleton-lock files Chromium leaves in the profile dir; safe to remove
 # when we know there's no live process holding them.
 STALE_LOCKS = ("SingletonLock", "SingletonCookie", "SingletonSocket")
+VALID_LAUNCH_MODES = {"headless", "headed"}
+VALID_PROFILE_MODES = {"skill", "user"}
 
 
 def _ensure_dirs() -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _normalize_launch_mode(mode: str) -> str:
+    value = mode.strip().lower()
+    aliases = {
+        "headful": "headed",
+        "visible": "headed",
+        "gui": "headed",
+    }
+    value = aliases.get(value, value)
+    if value not in VALID_LAUNCH_MODES:
+        raise ValueError(
+            "launch mode must be 'headless' or 'headed' "
+            "(or use --headless / --headed)"
+        )
+    return value
+
+
+def default_launch_mode() -> str:
+    """Default mode used only when spawning a fresh daemon."""
+    return _normalize_launch_mode(os.environ.get("NODRIVER_SKILL_MODE", "headless"))
+
+
+def pop_launch_mode(args: list[str]) -> tuple[str | None, list[str]]:
+    """
+    Consume leading global browser launch flags from a script argv tail.
+
+    Returns (requested_mode, remaining_args). requested_mode is None when the
+    caller did not explicitly ask for a mode; in that case an existing daemon is
+    accepted as-is, and a new daemon uses default_launch_mode().
+
+    Profile flags are applied to this process through environment variables so
+    existing script call sites only need to pass the requested mode to attach().
+    """
+    rest = list(args)
+    mode: str | None = None
+    profile: str | None = None
+    while rest:
+        flag = rest[0]
+        if flag in ("--headed", "--headless"):
+            rest.pop(0)
+            requested = "headed" if flag == "--headed" else "headless"
+            if mode is not None and mode != requested:
+                raise ValueError("choose only one of --headed or --headless")
+            mode = requested
+            continue
+        if flag in ("--user-profile", "--skill-profile"):
+            rest.pop(0)
+            requested_profile = "user" if flag == "--user-profile" else "skill"
+            if profile is not None and profile != requested_profile:
+                raise ValueError("choose only one of --user-profile or --skill-profile")
+            profile = requested_profile
+            os.environ["NODRIVER_SKILL_PROFILE"] = requested_profile
+            os.environ["NODRIVER_SKILL_PROFILE_EXPLICIT"] = "1"
+            continue
+        if flag == "--profile-directory":
+            rest.pop(0)
+            if not rest:
+                raise ValueError("--profile-directory requires a Chrome profile name")
+            if profile == "skill":
+                raise ValueError("--profile-directory requires --user-profile")
+            profile = "user"
+            os.environ["NODRIVER_CHROME_PROFILE_DIRECTORY"] = rest.pop(0)
+            os.environ["NODRIVER_SKILL_PROFILE"] = "user"
+            os.environ["NODRIVER_SKILL_PROFILE_EXPLICIT"] = "1"
+            continue
+        if flag == "--user-data-dir":
+            rest.pop(0)
+            if not rest:
+                raise ValueError("--user-data-dir requires a path")
+            if profile == "skill":
+                raise ValueError("--user-data-dir requires --user-profile")
+            profile = "user"
+            os.environ["NODRIVER_CHROME_USER_DATA_DIR"] = rest.pop(0)
+            os.environ["NODRIVER_SKILL_PROFILE"] = "user"
+            os.environ["NODRIVER_SKILL_PROFILE_EXPLICIT"] = "1"
+            continue
+        if flag == "--no-sandbox":
+            rest.pop(0)
+            os.environ["NODRIVER_CHROME_NO_SANDBOX"] = "1"
+            os.environ["NODRIVER_CHROME_NO_SANDBOX_EXPLICIT"] = "1"
+            continue
+        break
+    return mode, rest
+
+
+def _normalize_profile_mode(mode: str) -> str:
+    value = mode.strip().lower()
+    aliases = {
+        "isolated": "skill",
+        "chrome": "user",
+        "default": "user",
+        "user-profile": "user",
+    }
+    value = aliases.get(value, value)
+    if value not in VALID_PROFILE_MODES:
+        raise ValueError("profile mode must be 'skill' or 'user'")
+    return value
+
+
+def _chrome_user_data_dir() -> Path:
+    env_dir = os.environ.get("NODRIVER_CHROME_USER_DATA_DIR")
+    if env_dir:
+        return Path(env_dir).expanduser()
+
+    system = platform.system()
+    if system == "Darwin":
+        cands = [
+            Path.home() / "Library/Application Support/Google/Chrome",
+            Path.home() / "Library/Application Support/Chromium",
+        ]
+    elif system == "Windows":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        base = Path(local_app_data) if local_app_data else Path.home() / "AppData/Local"
+        cands = [
+            base / "Google/Chrome/User Data",
+            base / "Chromium/User Data",
+        ]
+    else:
+        cands = [
+            Path.home() / ".config/google-chrome",
+            Path.home() / ".config/chromium",
+        ]
+
+    for c in cands:
+        if c.exists():
+            return c
+    return cands[0]
+
+
+def _profile_mode_explicit() -> bool:
+    return (
+        "NODRIVER_SKILL_PROFILE" in os.environ
+        or "NODRIVER_SKILL_PROFILE_EXPLICIT" in os.environ
+        or "NODRIVER_CHROME_USER_DATA_DIR" in os.environ
+        or "NODRIVER_CHROME_PROFILE_DIRECTORY" in os.environ
+    )
+
+
+def launch_profile() -> dict:
+    default_profile = "user" if (
+        "NODRIVER_CHROME_USER_DATA_DIR" in os.environ
+        or "NODRIVER_CHROME_PROFILE_DIRECTORY" in os.environ
+    ) else "skill"
+    mode = _normalize_profile_mode(os.environ.get("NODRIVER_SKILL_PROFILE", default_profile))
+    if mode == "skill":
+        return {
+            "mode": "skill",
+            "user_data_dir": str(PROFILE_DIR),
+            "profile_directory": None,
+        }
+
+    user_data_dir = _chrome_user_data_dir()
+    profile_directory = os.environ.get("NODRIVER_CHROME_PROFILE_DIRECTORY", "Default")
+    return {
+        "mode": "user",
+        "user_data_dir": str(user_data_dir),
+        "profile_directory": profile_directory,
+    }
+
+
+def _env_bool(name: str) -> bool:
+    value = os.environ.get(name, "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def launch_no_sandbox() -> bool:
+    return _env_bool("NODRIVER_CHROME_NO_SANDBOX")
+
+
+def _no_sandbox_explicit() -> bool:
+    return (
+        "NODRIVER_CHROME_NO_SANDBOX" in os.environ
+        or "NODRIVER_CHROME_NO_SANDBOX_EXPLICIT" in os.environ
+    )
 
 
 # ─────────────────────────────────────────────────────── chrome discovery ──
@@ -225,10 +413,105 @@ def _process_is_chrome(pid: int) -> bool:
         return False
 
 
+def _process_launch_mode(pid: int | None) -> str | None:
+    """Best-effort mode detection for live daemons we did not start."""
+    if pid is None:
+        return None
+    try:
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "ignore")
+        if "--headless" in cmdline:
+            return "headless"
+        if "chrom" in cmdline.lower():
+            return "headed"
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+    return None
+
+
+def running_launch_mode() -> str | None:
+    try:
+        mode = _normalize_launch_mode(MODE_FILE.read_text().strip())
+        return mode
+    except (FileNotFoundError, OSError, ValueError):
+        pass
+    return _process_launch_mode(_read_pid())
+
+
+def running_profile() -> dict | None:
+    try:
+        data = json.loads(PROFILE_FILE.read_text())
+        user_data_dir = data.get("user_data_dir")
+        if not isinstance(user_data_dir, str) or not user_data_dir:
+            return None
+        mode = _normalize_profile_mode(data.get("mode", "skill"))
+        profile_directory = data.get("profile_directory")
+        if profile_directory is not None and not isinstance(profile_directory, str):
+            profile_directory = None
+        return {
+            "mode": mode,
+            "user_data_dir": user_data_dir,
+            "profile_directory": profile_directory,
+        }
+    except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def running_no_sandbox() -> bool | None:
+    try:
+        value = SANDBOX_FILE.read_text().strip()
+        if value == "disabled":
+            return True
+        if value == "enabled":
+            return False
+    except (FileNotFoundError, OSError):
+        pass
+
+    pid = _read_pid()
+    if pid is None:
+        return None
+    try:
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "ignore")
+        if "--no-sandbox" in cmdline:
+            return True
+        if "chrom" in cmdline.lower():
+            return False
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+    return None
+
+
 def _atomic_write_pid(pid: int) -> None:
     tmp = PID_FILE.with_suffix(".tmp")
     tmp.write_text(str(pid))
     tmp.replace(PID_FILE)
+
+
+def _atomic_write_mode(mode: str) -> None:
+    tmp = MODE_FILE.with_suffix(".tmp")
+    tmp.write_text(mode)
+    tmp.replace(MODE_FILE)
+
+
+def _atomic_write_profile(profile: dict) -> None:
+    tmp = PROFILE_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(profile, indent=2, sort_keys=True))
+    tmp.replace(PROFILE_FILE)
+
+
+def _atomic_write_sandbox(disabled: bool) -> None:
+    tmp = SANDBOX_FILE.with_suffix(".tmp")
+    tmp.write_text("disabled" if disabled else "enabled")
+    tmp.replace(SANDBOX_FILE)
+
+
+def _same_profile(left: dict | None, right: dict | None) -> bool:
+    if left is None or right is None:
+        return False
+    return (
+        Path(left["user_data_dir"]).expanduser()
+        == Path(right["user_data_dir"]).expanduser()
+        and left.get("profile_directory") == right.get("profile_directory")
+    )
 
 
 def _clean_stale_locks() -> None:
@@ -259,12 +542,21 @@ class _StartLock:
             self._fd.close()
 
 
-def ensure_daemon() -> int:
+def ensure_daemon(mode: str | None = None) -> int:
     """
     Idempotent + race-free: guarantee exactly one Chromium daemon is running
     on PORT, and return its PID. Safe to call from concurrent processes.
+
+    If mode is explicit and a daemon already exists in the opposite mode, the
+    caller must stop it first; a running browser cannot be made headed/headless
+    in place.
     """
     _ensure_dirs()
+    requested_mode = _normalize_launch_mode(mode) if mode is not None else None
+    requested_profile = launch_profile()
+    profile_explicit = _profile_mode_explicit()
+    requested_no_sandbox = launch_no_sandbox()
+    no_sandbox_explicit = _no_sandbox_explicit()
 
     with _StartLock():
         # Re-check inside the lock — someone else may have just started it.
@@ -274,6 +566,45 @@ def ensure_daemon() -> int:
                 # Adopt: alive but no PID file (e.g. survived a state wipe).
                 _atomic_write_pid(_find_chrome_pid_on_port() or 0)
                 pid = _read_pid() or 0
+            current_mode = running_launch_mode()
+            if requested_mode is not None:
+                if current_mode is None:
+                    raise RuntimeError(
+                        f"daemon is already running on port {PORT}, but its mode is unknown; "
+                        f"run stop_daemon.py before starting {requested_mode} mode"
+                    )
+                if requested_mode != current_mode:
+                    raise RuntimeError(
+                        f"daemon is already running in {current_mode} mode on port {PORT}; "
+                        f"run stop_daemon.py before starting {requested_mode} mode"
+                    )
+            current_profile = running_profile()
+            if profile_explicit:
+                if current_profile is None:
+                    raise RuntimeError(
+                        "daemon is already running, but its profile is unknown; "
+                        "run stop_daemon.py before changing profiles"
+                    )
+                if not _same_profile(requested_profile, current_profile):
+                    raise RuntimeError(
+                        "daemon is already running with "
+                        f"{current_profile['mode']} profile at {current_profile['user_data_dir']}; "
+                        "run stop_daemon.py before changing profiles"
+                    )
+            current_no_sandbox = running_no_sandbox()
+            if no_sandbox_explicit:
+                if current_no_sandbox is None:
+                    raise RuntimeError(
+                        "daemon is already running, but its sandbox setting is unknown; "
+                        "run stop_daemon.py before changing sandbox flags"
+                    )
+                if requested_no_sandbox != current_no_sandbox:
+                    current = "disabled" if current_no_sandbox else "enabled"
+                    requested = "disabled" if requested_no_sandbox else "enabled"
+                    raise RuntimeError(
+                        f"daemon is already running with Chrome sandbox {current}; "
+                        f"run stop_daemon.py before starting with sandbox {requested}"
+                    )
             return pid
 
         # Port bound but not CDP → alien process. Refuse.
@@ -304,24 +635,39 @@ def ensure_daemon() -> int:
                 pass
 
         # Spawn fresh.
+        launch_mode = requested_mode or default_launch_mode()
+        launch_profile_spec = requested_profile
+        user_data_dir = Path(launch_profile_spec["user_data_dir"]).expanduser()
+        if launch_profile_spec["mode"] == "user" and not user_data_dir.exists():
+            raise FileNotFoundError(
+                f"Chrome user data dir does not exist: {user_data_dir}. "
+                "Use --user-data-dir PATH or --skill-profile."
+            )
+
         chrome = find_chrome()
+        launch_args = [
+            chrome,
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-background-networking",
+            "--disable-default-apps",
+            "--disable-extensions",
+            "--disable-sync",
+            "--mute-audio",
+            f"--remote-debugging-port={PORT}",
+            "--remote-debugging-address=127.0.0.1",
+            f"--user-data-dir={user_data_dir}",
+        ]
+        if launch_mode == "headless":
+            launch_args.insert(1, "--headless=new")
+        if requested_no_sandbox:
+            launch_args.insert(1, "--no-sandbox")
+        if launch_profile_spec.get("profile_directory"):
+            launch_args.append(f"--profile-directory={launch_profile_spec['profile_directory']}")
+
         log_fp = open(LOG_FILE, "ab")
         proc = subprocess.Popen(
-            [
-                chrome,
-                "--headless=new",
-                "--no-sandbox",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--disable-background-networking",
-                "--disable-default-apps",
-                "--disable-extensions",
-                "--disable-sync",
-                "--mute-audio",
-                f"--remote-debugging-port={PORT}",
-                "--remote-debugging-address=127.0.0.1",
-                f"--user-data-dir={PROFILE_DIR}",
-            ],
+            launch_args,
             stdout=log_fp,
             stderr=log_fp,
             stdin=subprocess.DEVNULL,
@@ -329,6 +675,12 @@ def ensure_daemon() -> int:
             close_fds=True,
         )
         _atomic_write_pid(proc.pid)
+        _atomic_write_mode(launch_mode)
+        _atomic_write_sandbox(requested_no_sandbox)
+        _atomic_write_profile({
+            **launch_profile_spec,
+            "user_data_dir": str(user_data_dir),
+        })
 
         # Poll for readiness.
         deadline = time.monotonic() + DAEMON_BOOT_TIMEOUT_S
@@ -349,6 +701,18 @@ def ensure_daemon() -> int:
             pass
         try:
             PID_FILE.unlink()
+        except FileNotFoundError:
+            pass
+        try:
+            MODE_FILE.unlink()
+        except FileNotFoundError:
+            pass
+        try:
+            PROFILE_FILE.unlink()
+        except FileNotFoundError:
+            pass
+        try:
+            SANDBOX_FILE.unlink()
         except FileNotFoundError:
             pass
         raise RuntimeError(
@@ -376,7 +740,7 @@ def _find_chrome_pid_on_port() -> int | None:
 
 def _clear_session_state() -> None:
     """Remove ephemeral state that's only valid while a daemon is running."""
-    for f in (PID_FILE, PERSISTENT_TAB_FILE, REFS_FILE):
+    for f in (PID_FILE, MODE_FILE, PROFILE_FILE, SANDBOX_FILE, PERSISTENT_TAB_FILE, REFS_FILE):
         try:
             f.unlink()
         except FileNotFoundError:
@@ -420,12 +784,13 @@ def stop_daemon() -> bool:
 
 # ──────────────────────────────────────────────────────────── nodriver ────
 
-async def attach():
+async def attach(mode: str | None = None):
     """
     Attach to the running daemon (auto-starting it if necessary).
     Returns a nodriver Browser instance.
     """
-    ensure_daemon()
+    ensure_daemon(mode=mode)
+    profile = running_profile() or launch_profile()
     import nodriver as uc  # lazy
     config = uc.Config(
         host="127.0.0.1",
@@ -435,7 +800,7 @@ async def attach():
     # Tell nodriver this is OUR profile dir, not a temp scratch one — this
     # sets _custom_data_dir=True so deconstruct_browser() skips its rmtree
     # and the noisy "successfully removed temp profile" print at exit.
-    config.user_data_dir = str(PROFILE_DIR)
+    config.user_data_dir = profile["user_data_dir"]
     browser = await uc.Browser.create(config=config)
     await browser.start()
     return browser

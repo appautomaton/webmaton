@@ -15,7 +15,8 @@ os.environ.setdefault("UV_LINK_MODE", "copy")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 from runner import (  # noqa: E402
     PID_FILE, PORT, is_daemon_alive, _read_pid, _process_alive,
-    attach, list_tabs, output,
+    attach, list_tabs, output, pop_launch_mode, running_launch_mode, running_profile,
+    running_no_sandbox,
 )
 
 
@@ -47,11 +48,23 @@ def _proc_info(pid: int) -> dict:
 
 
 async def main() -> int:
+    try:
+        mode, args = pop_launch_mode(sys.argv[1:])
+    except ValueError as e:
+        print(json.dumps({"error": str(e)}, indent=2))
+        return 2
+    if args:
+        print(json.dumps({"error": "usage: status.py [--headed|--headless]"}, indent=2))
+        return 2
+
     alive = is_daemon_alive()
     pid = _read_pid()
     payload: dict = {
         "alive": alive,
         "port": PORT,
+        "mode": running_launch_mode(),
+        "profile": running_profile(),
+        "no_sandbox": running_no_sandbox(),
         "pid_file": str(PID_FILE),
         "pid": pid,
     }
@@ -63,7 +76,7 @@ async def main() -> int:
         return 0
 
     # Daemon is up — also fetch the tab list.
-    browser = await attach()
+    browser = await attach(mode=mode)
     payload["tabs"] = await list_tabs(browser)
     await output(payload, browser=browser)
     return 0

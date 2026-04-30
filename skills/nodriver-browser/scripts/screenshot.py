@@ -11,22 +11,27 @@ Usage:  screenshot.py                       — saves to /tmp/nodriver-skill/las
         screenshot.py --full /tmp/full.png  — full scrollable page (not just viewport)
 """
 import os
+import json
 import sys
 from pathlib import Path
 
 os.environ.setdefault("UV_LINK_MODE", "copy")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
-from runner import attach, get_persistent_tab, output, STATE_DIR  # noqa: E402
+from runner import attach, get_persistent_tab, output, pop_launch_mode, STATE_DIR  # noqa: E402
 
 
 async def main() -> int:
-    args = sys.argv[1:]
+    try:
+        mode, args = pop_launch_mode(sys.argv[1:])
+    except ValueError as e:
+        print(json.dumps({"error": str(e)}, indent=2))
+        return 2
     full_page = "--full" in args
     args = [a for a in args if a != "--full"]
     out_path = Path(args[0]) if args else (STATE_DIR / "last.png")
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    browser = await attach()
+    browser = await attach(mode=mode)
     tab = await get_persistent_tab(browser)
 
     # nodriver's save_screenshot returns the path it actually used

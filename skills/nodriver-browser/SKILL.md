@@ -1,11 +1,11 @@
 ---
 name: nodriver-browser
-description: "Persistent Chrome/Chromium browser automation skill built on nodriver. Use when a page needs JavaScript rendering, authorized login/session continuity, clicking or typing, DOM snapshots with stable refs, screenshots, or multi-step look-think-act flows that ordinary WebFetch/search cannot complete. Auto-starts a headless Chromium daemon and preserves one tab across calls; not for static pages, simple searches, JSON APIs, or one-off scrapes."
+description: "Persistent Chrome/Chromium browser automation skill built on nodriver. Use when a page needs JavaScript rendering, authorized login/session continuity, clicking or typing, DOM snapshots with stable refs, screenshots, or multi-step look-think-act flows that ordinary WebFetch/search cannot complete. Auto-starts a headless or headed Chrome daemon, can use an isolated skill profile or the user's Chrome profile, and preserves one tab across calls; not for static pages, simple searches, JSON APIs, or one-off scrapes."
 ---
 
 # nodriver-browser
 
-A persistent, headless Chromium that **stays alive between Claude's turns**. Built on `nodriver` (CDP-direct, no Selenium, no `navigator.webdriver`). Every script attaches to the same long-running browser, performs one action, exits — the browser and its tab keep going.
+A persistent Chrome/Chromium browser that **stays alive between Claude's turns**. Built on `nodriver` (CDP-direct, no Selenium, no `navigator.webdriver`). Every script attaches to the same long-running browser, performs one action, exits — the browser and its tab keep going.
 
 **Core invariant: ONE daemon, ONE persistent tab (`tabs[0]`).** Every script reports `tabs_open` in its output. If you ever see `tabs_open > 1`, treat it as a real signal that something opened a stray tab — read the warning and act on it.
 
@@ -34,6 +34,9 @@ Scripts live in `scripts/` next to this SKILL.md — resolve paths relative to t
 # 1. Navigate (auto-starts daemon on first call — no manual start needed)
 scripts/nav.py https://news.ycombinator.com
 
+# Optional: visible browser window, using the user's Chrome profile
+scripts/nav.py --headed --user-profile https://example.com
+
 # 2. Snapshot the page — gives you text + numbered refs for every interactive element
 scripts/snapshot.py
 
@@ -51,11 +54,25 @@ scripts/stop_daemon.py
 
 All scripts return JSON to stdout. Every script (except daemon control) appends `tabs_open: N` and emits a `warning` field if `N > 1`.
 
+Leading browser options work on `start_daemon.py` and every script that auto-starts/attaches:
+
+| Option | Purpose |
+|---|---|
+| `--headless` | Start a headless daemon. This is the default when no daemon is running. |
+| `--headed` | Start a visible Chrome/Chromium window. If a daemon is already running in headless mode, stop it first. |
+| `--skill-profile` | Use the isolated profile at `~/.cache/nodriver-skill/profile/`. This is the default. |
+| `--user-profile` | Use the user's Chrome profile root. Useful for existing logged-in state; requires that regular Chrome is not already locking the same profile. |
+| `--profile-directory NAME` | Use a Chrome profile directory such as `Default` or `Profile 1`; implies `--user-profile`. |
+| `--user-data-dir PATH` | Override the Chrome user-data root; implies `--user-profile`. |
+| `--no-sandbox` | Disable Chrome's OS sandbox. Use only when Chrome cannot start in constrained environments such as PRoot/container/root setups. Do not use for normal system Chrome or the user's Chrome profile. |
+
+Environment equivalents: `NODRIVER_SKILL_MODE=headed|headless`, `NODRIVER_SKILL_PROFILE=skill|user`, `NODRIVER_CHROME_PROFILE_DIRECTORY="Profile 1"`, `NODRIVER_CHROME_USER_DATA_DIR=/path/to/User Data`, `NODRIVER_CHROME_NO_SANDBOX=1`.
+
 ### Daemon control (no nodriver needed — fast)
 
 | Script | Purpose | Output |
 |---|---|---|
-| `start_daemon.py` | Idempotent start. No-op if already running. | `{ok, pid, port, already_running}` |
+| `start_daemon.py` | Idempotent start. No-op if already running. Supports leading browser options. | `{ok, pid, port, mode, profile, no_sandbox, already_running}` |
 | `stop_daemon.py` | Kill daemon, clean PID file + stale singleton locks. | `{ok, stopped}` |
 | `status.py` | Daemon health + tab list. | `{alive, pid, process: {uptime_s, rss_kb}, tabs: [...]}` |
 
@@ -131,15 +148,18 @@ scripts/click.py r3
 
 The daemon is **singleton-enforced via `fcntl.flock`** on `/tmp/nodriver-skill/start.lock`. Five concurrent script invocations from a cold start will only ever spawn one Chromium.
 
-- **Auto-start**: First call to any interaction script (nav, state, snapshot, ...) auto-starts the daemon if it's not running. You don't need to call `start_daemon.py` first unless you want to verify it manually.
+- **Auto-start**: First call to any interaction script (nav, state, snapshot, ...) auto-starts the daemon if it's not running. You don't need to call `start_daemon.py` first unless you want to verify it manually or choose options like `--headed --user-profile`.
 - **Persists**: The daemon runs with `start_new_session=True` so it survives the parent script exit. It will stay alive across all your turn boundaries until explicit shutdown.
 - **Explicit stop**: `stop_daemon.py` SIGTERMs the daemon, then SIGKILLs after 2s if needed, cleans the PID file and stale singleton locks. Run this at the end of any session that started the daemon.
 - **Port**: 9222 by default. Override with `NODRIVER_SKILL_PORT=9223` if something else holds 9222.
-- **Profile**: `~/.cache/nodriver-skill/profile/` (cookies, localStorage, IndexedDB, etc.). Persists across daemon restarts.
+- **Mode**: headless by default. Use `--headed` for a visible window. You cannot change a running daemon from headless to headed; stop it first.
+- **Profile**: isolated skill profile by default: `~/.cache/nodriver-skill/profile/` (cookies, localStorage, IndexedDB, etc.). Use `--user-profile` for the user's Chrome profile.
+- **Chrome binary**: uses `CHROMIUM_PATH` / `CHROME_PATH` first, then system Chrome/Chromium paths, including macOS `/Applications/Google Chrome.app/...`.
+- **Sandbox**: Chrome's sandbox is enabled by default. Only pass `--no-sandbox` for constrained environments where Chrome cannot start with the OS sandbox, such as PRoot/container/root setups.
 
 ## Tab hygiene (READ THIS)
 
-This skill runs Chromium **headlessly** — there is no visible window. You cannot see stray tabs unless you ask for them. **Some sites open new tabs you didn't ask for**: `target="_blank"` links, `window.open()` calls, popup ads, OAuth redirects.
+In default headless mode there is no visible window. In headed mode you can see the browser, but the tab contract is still enforced by script output. **Some sites open new tabs you didn't ask for**: `target="_blank"` links, `window.open()` calls, popup ads, OAuth redirects.
 
 The contract is **one tab**. If `tabs_open > 1` in any script's output (and the `warning` field is set):
 
@@ -157,6 +177,8 @@ Don't ignore the warning. Tabs accumulate. 30 stale tabs = ~2 GB of RAM and a co
 - **Refs go stale on re-render.** SPAs that re-mount components on route change will lose `data-nd-ref` attributes. Re-run `snapshot.py` after every navigation or significant action.
 - **Concurrent navigations on the same tab race.** Multiple processes can attach simultaneously, but two `nav.py` calls to different URLs at the same time will fight. Serialize them.
 - **Daemon outlives the session.** If you forget `stop_daemon.py`, Chromium keeps running — silently eating ~190 MB of RAM until you explicitly stop it or reboot. Stop it when you're done.
+- **User Chrome profile can be locked.** `--user-profile` uses the real Chrome profile root, so close normal Chrome first if startup fails or if Chrome attaches to the existing app instead of opening the CDP daemon.
+- **`--no-sandbox` is not normal.** It weakens browser isolation and shows Chrome's unsupported-flag banner in headed mode. Use it only for PRoot/container/root environments where normal sandboxed Chrome cannot start.
 - **`wait.py` polls every 250ms.** Don't use it for sub-second timing-sensitive stuff.
 - **`type.py` clears the field first.** If you need to append, read the existing value with `eval.py` first.
 - **`eval.py` takes ONE expression**, not statements. Multi-statement code: `eval.py '(() => { let x = 1; x++; return x; })()'`.
@@ -169,6 +191,11 @@ Don't ignore the warning. Tabs accumulate. 30 stale tabs = ~2 GB of RAM and a co
 | `daemon won't start` | Chrome binary missing | Set `CHROMIUM_PATH=/path/to/chrome` or `apt install chromium` |
 | `port 9222 in use by a non-CDP process` | Another tool holds 9222 | `NODRIVER_SKILL_PORT=9223 ./scripts/start_daemon.py` |
 | `PID is a chromium process but isn't responding` | Crashed daemon left a zombie | `./scripts/stop_daemon.py` to clean up, then retry |
+| `daemon is already running in headless/headed mode` | A running daemon cannot change visibility mode | `./scripts/stop_daemon.py`, then restart with `--headed` or `--headless` |
+| `daemon is already running with ... profile` | A running daemon cannot change profile root | `./scripts/stop_daemon.py`, then restart with `--user-profile` or `--skill-profile` |
+| `daemon is already running with Chrome sandbox ...` | A running daemon cannot change sandbox flags | `./scripts/stop_daemon.py`, then restart with or without `--no-sandbox` |
+| Chrome says `unsupported command-line flag: --no-sandbox` | You started headed Chrome with sandbox disabled | Stop the daemon and restart without `--no-sandbox` unless you are in PRoot/container/root |
+| `Chrome user data dir does not exist` | The detected user profile root is missing | Use `--user-data-dir PATH` or fall back to `--skill-profile` |
 | `no snapshot yet — run snapshot.py first` | `click.py` called without prior snapshot | Run `snapshot.py` first |
 | `ref no longer in DOM` | Page navigated/re-rendered | Re-run `snapshot.py`, get the new ref |
 | `tabs_open: 5, warning: ...` | Site opened popups/new tabs | `cleanup.py` closes everything except tabs[0] |

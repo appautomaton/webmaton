@@ -25,12 +25,23 @@ from pathlib import Path
 
 os.environ.setdefault("UV_LINK_MODE", "copy")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
-from runner import attach, get_persistent_tab, output, REFS_FILE, STATE_DIR  # noqa: E402
+from runner import (  # noqa: E402
+    attach, get_persistent_tab, output, pop_launch_mode, REFS_FILE, STATE_DIR,
+)
 from snapshot import take_snapshot, build_selector_map  # noqa: E402
 
 
 async def main() -> int:
-    browser = await attach()
+    try:
+        mode, args = pop_launch_mode(sys.argv[1:])
+    except ValueError as e:
+        print(json.dumps({"error": str(e)}, indent=2))
+        return 2
+    if args:
+        print(json.dumps({"error": "usage: snapshot.py [--headed|--headless]"}, indent=2))
+        return 2
+
+    browser = await attach(mode=mode)
     tab = await get_persistent_tab(browser)
     snap = await take_snapshot(tab)
 

@@ -22,7 +22,7 @@ from pathlib import Path
 
 os.environ.setdefault("UV_LINK_MODE", "copy")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
-from runner import attach, get_persistent_tab, js, output, REFS_FILE  # noqa: E402
+from runner import attach, get_persistent_tab, js, output, pop_launch_mode, REFS_FILE  # noqa: E402
 
 
 KEY_JS = r"""
@@ -53,15 +53,20 @@ KEY_JS = r"""
 
 
 async def main() -> int:
-    if len(sys.argv) < 2:
-        print('{"error": "usage: press.py KEY  OR  press.py REF KEY"}')
+    try:
+        mode, args = pop_launch_mode(sys.argv[1:])
+    except ValueError as e:
+        print(json.dumps({"error": str(e)}, indent=2))
+        return 2
+    if len(args) < 1:
+        print('{"error": "usage: press.py [--headed|--headless] KEY  OR  press.py [--headed|--headless] REF KEY"}')
         return 2
 
-    if len(sys.argv) == 2:
-        ref, key = None, sys.argv[1]
+    if len(args) == 1:
+        ref, key = None, args[0]
         selector = None
     else:
-        ref, key = sys.argv[1], sys.argv[2]
+        ref, key = args[0], args[1]
         if not REFS_FILE.exists():
             print(json.dumps({"error": "run snapshot.py first"}, indent=2))
             return 1
@@ -71,7 +76,7 @@ async def main() -> int:
             print(json.dumps({"error": f"unknown ref {ref!r}"}, indent=2))
             return 1
 
-    browser = await attach()
+    browser = await attach(mode=mode)
     tab = await get_persistent_tab(browser)
     expr = f"({KEY_JS})({json.dumps(selector)}, {json.dumps(key)})"
     result = await js(tab, expr)

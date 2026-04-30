@@ -16,14 +16,19 @@ from pathlib import Path
 
 os.environ.setdefault("UV_LINK_MODE", "copy")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
-from runner import attach, get_persistent_tab, js, output, REFS_FILE  # noqa: E402
+from runner import attach, get_persistent_tab, js, output, pop_launch_mode, REFS_FILE  # noqa: E402
 
 
 async def main() -> int:
-    if len(sys.argv) < 2:
-        print('{"error": "usage: click.py REF"}')
+    try:
+        mode, args = pop_launch_mode(sys.argv[1:])
+    except ValueError as e:
+        print(json.dumps({"error": str(e)}, indent=2))
         return 2
-    ref = sys.argv[1]
+    if len(args) < 1:
+        print('{"error": "usage: click.py [--headed|--headless] REF"}')
+        return 2
+    ref = args[0]
 
     if not REFS_FILE.exists():
         print(json.dumps({
@@ -41,7 +46,7 @@ async def main() -> int:
         }, indent=2))
         return 1
 
-    browser = await attach()
+    browser = await attach(mode=mode)
     tab = await get_persistent_tab(browser)
 
     # Check the element still exists, then click it.

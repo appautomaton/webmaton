@@ -13,22 +13,28 @@ Usage:  eval.py 'document.title'
 The expression should be a single JS expression, not statements. Wrap
 multi-statement code in an IIFE: '(() => { ...; return value; })()'
 """
+import json
 import os
 import sys
 from pathlib import Path
 
 os.environ.setdefault("UV_LINK_MODE", "copy")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
-from runner import attach, get_persistent_tab, js, output  # noqa: E402
+from runner import attach, get_persistent_tab, js, output, pop_launch_mode  # noqa: E402
 
 
 async def main() -> int:
-    if len(sys.argv) < 2:
-        print('{"error": "usage: eval.py JS_EXPRESSION"}')
+    try:
+        mode, args = pop_launch_mode(sys.argv[1:])
+    except ValueError as e:
+        print(json.dumps({"error": str(e)}, indent=2))
         return 2
-    expr = sys.argv[1]
+    if len(args) < 1:
+        print('{"error": "usage: eval.py [--headed|--headless] JS_EXPRESSION"}')
+        return 2
+    expr = args[0]
 
-    browser = await attach()
+    browser = await attach(mode=mode)
     tab = await get_persistent_tab(browser)
     try:
         result = await js(tab, expr)

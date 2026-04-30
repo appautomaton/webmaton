@@ -3,24 +3,30 @@
 # requires-python = ">=3.10"
 # dependencies = ["nodriver"]
 # ///
-"""Navigate the persistent tab to a URL. Usage: nav.py URL"""
+"""Navigate the persistent tab to a URL. Usage: nav.py [--headed|--headless] URL"""
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
 
 os.environ.setdefault("UV_LINK_MODE", "copy")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
-from runner import attach, get_persistent_tab, js, output  # noqa: E402
+from runner import attach, get_persistent_tab, js, output, pop_launch_mode  # noqa: E402
 
 
 async def main() -> int:
-    if len(sys.argv) < 2:
-        print('{"error": "usage: nav.py URL"}')
+    try:
+        mode, args = pop_launch_mode(sys.argv[1:])
+    except ValueError as e:
+        print(json.dumps({"error": str(e)}, indent=2))
         return 2
-    url = sys.argv[1]
+    if len(args) < 1:
+        print('{"error": "usage: nav.py [--headed|--headless] URL"}')
+        return 2
+    url = args[0]
 
-    browser = await attach()
+    browser = await attach(mode=mode)
     tab = await get_persistent_tab(browser)
     await tab.get(url)
     # Give it a moment to start rendering before we read state.

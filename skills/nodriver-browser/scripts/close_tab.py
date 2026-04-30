@@ -19,20 +19,26 @@ os.environ.setdefault("UV_LINK_MODE", "copy")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 from runner import (  # noqa: E402
     attach, _refresh_targets, _page_tabs, _persistent_target_id, output,
+    pop_launch_mode,
 )
 
 
 async def main() -> int:
-    if len(sys.argv) < 2:
-        print('{"error": "usage: close_tab.py INDEX"}')
+    try:
+        mode, args = pop_launch_mode(sys.argv[1:])
+    except ValueError as e:
+        print(json.dumps({"error": str(e)}, indent=2))
+        return 2
+    if len(args) < 1:
+        print('{"error": "usage: close_tab.py [--headed|--headless] INDEX"}')
         return 2
     try:
-        index = int(sys.argv[1])
+        index = int(args[0])
     except ValueError:
         print('{"error": "INDEX must be an integer"}')
         return 2
 
-    browser = await attach()
+    browser = await attach(mode=mode)
     await _refresh_targets(browser)
     tabs = _page_tabs(browser)
     if index < 0 or index >= len(tabs):

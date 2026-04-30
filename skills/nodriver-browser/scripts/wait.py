@@ -20,13 +20,17 @@ from pathlib import Path
 
 os.environ.setdefault("UV_LINK_MODE", "copy")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
-from runner import attach, get_persistent_tab, js, output  # noqa: E402
+from runner import attach, get_persistent_tab, js, output, pop_launch_mode  # noqa: E402
 
 
 async def main() -> int:
-    args = sys.argv[1:]
+    try:
+        mode, args = pop_launch_mode(sys.argv[1:])
+    except ValueError as e:
+        print(json.dumps({"error": str(e)}, indent=2))
+        return 2
     if not args:
-        print('{"error": "usage: wait.py SELECTOR_OR_TEXT [--text] [--timeout N]"}')
+        print('{"error": "usage: wait.py [--headed|--headless] SELECTOR_OR_TEXT [--text] [--timeout N]"}')
         return 2
 
     is_text = "--text" in args
@@ -42,7 +46,7 @@ async def main() -> int:
     args = [a for a in args if a != "--text"]
     needle = args[0]
 
-    browser = await attach()
+    browser = await attach(mode=mode)
     tab = await get_persistent_tab(browser)
 
     if is_text:

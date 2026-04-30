@@ -19,7 +19,7 @@ from pathlib import Path
 
 os.environ.setdefault("UV_LINK_MODE", "copy")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
-from runner import attach, get_persistent_tab, js, output, REFS_FILE  # noqa: E402
+from runner import attach, get_persistent_tab, js, output, pop_launch_mode, REFS_FILE  # noqa: E402
 
 
 TYPE_JS = r"""
@@ -48,10 +48,15 @@ TYPE_JS = r"""
 
 
 async def main() -> int:
-    if len(sys.argv) < 3:
-        print('{"error": "usage: type.py REF TEXT"}')
+    try:
+        mode, args = pop_launch_mode(sys.argv[1:])
+    except ValueError as e:
+        print(json.dumps({"error": str(e)}, indent=2))
         return 2
-    ref, text = sys.argv[1], sys.argv[2]
+    if len(args) < 2:
+        print('{"error": "usage: type.py [--headed|--headless] REF TEXT"}')
+        return 2
+    ref, text = args[0], args[1]
 
     if not REFS_FILE.exists():
         print(json.dumps({"error": "run snapshot.py first"}, indent=2))
@@ -62,7 +67,7 @@ async def main() -> int:
         print(json.dumps({"error": f"unknown ref {ref!r}"}, indent=2))
         return 1
 
-    browser = await attach()
+    browser = await attach(mode=mode)
     tab = await get_persistent_tab(browser)
     # Inject the helper, then call it. We can't pass arguments to evaluate()
     # cleanly, so we inline both via JSON-encoded literals.
