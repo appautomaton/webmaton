@@ -99,8 +99,11 @@ Environment equivalents: `NODRIVER_SKILL_MODE=headed|headless`, `NODRIVER_SKILL_
 | `snapshot.py` | — | Full page text + numbered interactive refs. **Writes refs to `/tmp/nodriver-skill/refs.json`** so click/type/press can resolve them. |
 | `click.py` | `REF` | Click element by ref id from latest snapshot. |
 | `type.py` | `REF TEXT` | Clear field and type. Dispatches `input`+`change` so React/Vue notice. |
+| `hover.py` | `REF` | Move mouse to element center via CDP, triggering CSS `:hover` and mouseover/mouseenter events. |
 | `press.py` | `KEY` or `REF KEY` | Send keyboard event (Enter, Tab, Escape, ArrowDown, single chars, ...). |
+| `select.py` | `REF VALUE` or `REF --index N` | Select an option from a `<select>` dropdown by value, visible text, or index. Dispatches `change`. |
 | `scroll.py` | `up\|down\|top\|bottom\|N` | Scroll viewport (N is pixels). |
+| `upload.py` | `REF FILE [FILE...]` | Set files on an `<input type="file">` by ref. Validates element type, uses CDP `DOM.setFileInputFiles`, dispatches `change`. |
 | `wait.py` | `SELECTOR [--text] [--timeout N]` | Block until selector exists (or text appears with `--text`). Default 30s. |
 | `eval.py` | `JS_EXPR` | Escape hatch: arbitrary JS expression. Multi-statement → wrap in IIFE. |
 
